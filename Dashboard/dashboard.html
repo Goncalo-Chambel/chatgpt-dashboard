@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Internal Dashboard</title>
+  <style>
+    /* Add your custom CSS styles here */
+    body {
+      background: linear-gradient(to bottom, #ffffff, #6f42c1); /* Vertical gradient background */
+      font-family: 'Arial', sans-serif; /* Change the font type */
+      margin: 0;
+      padding: 0;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+      color: #ffffff; /* Font color */
+    }
+
+    h1 {
+      font-size: 32px;
+      margin-bottom: 20px;
+      text-align: center;
+      text-transform: uppercase;
+      color: #6f42c1; /* Title color */
+    }
+
+    .section {
+      margin-bottom: 40px;
+      background-color: rgba(111, 66, 193, 0.7); /* Background color with transparency */
+      padding: 20px;
+      border-radius: 10px;
+    }
+
+    .metrics-container {
+      display: flex;
+      justify-content: space-between;
+      gap: 40px;
+      font-size: 24px;
+    }
+
+    .metric {
+      text-align: center;
+    }
+
+    .chart {
+      width: 600px;
+      height: 400px;
+      background-color: rgba(111, 66, 193, 0.7); /* Background color with transparency */
+      border-radius: 10px;
+    }
+
+    .charts-container {
+      display: flex;
+      gap: 40px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Internal Dashboard</h1>
+
+    <div class="section">
+      <h2>Overall Metrics</h2>
+      <div class="metrics-container">
+        <p class="metric">Total Clients: <span id="totalClients"></span></p>
+        <p class="metric">Total Revenue: $<span id="totalRevenue"></span> M</p>
+        <p class="metric">Average Satisfaction: <span id="averageSatisfaction"></span></p>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>More Information</h2>
+      <div class="charts-container">
+        <div id="productsChart" class="chart"></div>
+        <div id="revenueChart" class="chart"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+  <script>
+    function fetchData() {
+      // Load the Excel file
+      const file = 'data.xlsx';
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', file, true);
+      xhr.responseType = 'arraybuffer';
+
+      xhr.onload = function (e) {
+        const data = new Uint8Array(xhr.response);
+        const workbook = XLSX.read(data, { type: 'array' });
+
+        // Assuming the data is in the first sheet (modify if necessary)
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+
+        // Convert the worksheet to JSON
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        // Calculate total clients
+        const totalClients = jsonData.length - 1;
+
+        // Calculate total revenue and revenue over time
+        const revenueData = calculateRevenueData(jsonData);
+
+        // Calculate average satisfaction
+        const averageSatisfaction = calculateAverageSatisfaction(jsonData);
+
+        // Render metrics
+        renderMetrics(totalClients, revenueData[revenueData.length - 1].y, averageSatisfaction);
+
+        // Calculate product distribution data
+        const productsData = jsonData.slice(1).map(row => parseInt(row[2]));
+        const productsHistogram = createHistogram(productsData, 10);
+
+        // Render charts
+        renderProductsChart(productsHistogram);
+        renderRevenueChart(revenueData);
+      };
+
+      xhr.send();
+    }
+
+    function calculateRevenueData(jsonData) {
+      const sortedData = jsonData.slice(1).sort((a, b) => {
+        const dateA = new Date(a[1]);
+        const dateB = new Date(b[1]);
+        return dateA - dateB;
+      });
+
+      let totalRevenue = 0;
+      const revenueData = [];
+
+      for (const row of sortedData) {
+        const products = parseInt(row[2]);
+        const regDate = new Date(row[1]);
+        const monthsAsClient = (new Date() - regDate) / (1000 * 60 * 60 * 24 * 30); // Approximate months
+
+        totalRevenue += products * monthsAsClient * 100;
+
+        revenueData.push({ x: regDate, y: totalRevenue });
+      }
+
+      return revenueData;
+    }
+
+    function calculateAverageSatisfaction(jsonData) {
+      const satisfactionData = jsonData.slice(1).map(row => parseInt(row[3]));
+      const totalSatisfaction = satisfactionData.reduce((sum, value) => sum + value, 0);
+      const averageSatisfaction = totalSatisfaction / satisfactionData.length;
+
+      return averageSatisfaction.toFixed(2);
+    }
+
+    function renderMetrics(totalClients, totalRevenue, averageSatisfaction) {
+      const totalClientsElement = document.getElementById('totalClients');
+      const totalRevenueElement = document.getElementById('totalRevenue');
+      const averageSatisfactionElement = document.getElementById('averageSatisfaction');
+
+      totalClientsElement.textContent = totalClients;
+      totalRevenueElement.textContent = (totalRevenue / 1000000).toFixed(2);
+      averageSatisfactionElement.textContent = averageSatisfaction;
+    }
+
+    function createHistogram(data, binSize) {
+      const histogram = {};
+
+      for (const value of data) {
+        const bin = Math.floor(value / binSize) * binSize;
+
+        if (!histogram[bin]) {
+          histogram[bin] = 0;
+        }
+
+        histogram[bin]++;
+      }
+
+      return histogram;
+    }
+
+    function renderProductsChart(productsHistogram) {
+      const chartData = Object.entries(productsHistogram).map(([bin, count]) => ({
+        x: [bin],
+        y: [count],
+        type: 'bar',
+        name: 'Products',
+        showlegend: false
+      }));
+
+      const layout = {
+        title: 'Number of Products Distribution',
+        xaxis: { title: 'Number of Products' },
+        yaxis: { title: 'Count' }
+      };
+
+      Plotly.newPlot('productsChart', chartData, layout);
+    }
+
+    function renderRevenueChart(revenueData) {
+      const sortedData = revenueData.sort((a, b) => a.x - b.x);
+
+      const chartData = [{
+        x: sortedData.map(data => data.x),
+        y: sortedData.map(data => data.y),
+        type: 'scatter',
+        mode: 'lines',
+        name: 'Revenue'
+      }];
+
+      const layout = {
+        title: 'Total Revenue over Time',
+        xaxis: { title: 'Registration Date' },
+        yaxis: { title: 'Revenue' }
+      };
+
+      Plotly.newPlot('revenueChart', chartData, layout);
+    }
+
+    fetchData();
+  </script>
+</body>
+</html>
